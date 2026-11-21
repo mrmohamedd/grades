@@ -570,7 +570,8 @@ async function writeDoc(key, data){
   const str = JSON.stringify(clean);
   try{ localStorage.setItem(LSK(key), str); }catch(e){}
   const dirty=getDirty(); if(!dirty.includes(key)){ dirty.push(key); setDirty(dirty); }
-  await withTimeout(docRef(key).set(clean), 10000);
+  if (!navigator.onLine) throw Object.assign(new Error('offline'),{code:'offline'});
+  await withTimeout(docRef(key).set(clean), 6000);
   if (localStorage.getItem(LSK(key))===str){ setDirty(getDirty().filter(k=>k!==key)); }
 }
 async function deleteDoc(key){
