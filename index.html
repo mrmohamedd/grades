@@ -968,6 +968,8 @@ function exportScreen(){
   const c=S.cls, st=S.app.settings;
   const btn=h('button',{class:'btn primary',id:'xbtn',disabled:!c.students.length,onclick:doExport},'تحميل ملف Excel');
   const file=h('input',{type:'file',accept:'.json,application/json',id:'bk',style:'display:none'});
+  const fileAll=h('input',{type:'file',accept:'.json,application/json',style:'display:none'});
+  fileAll.addEventListener('change',async()=>{ const f=fileAll.files[0]; if(!f) return; try{ const d=JSON.parse(await f.text()); if(!d||d.kind!=='sijil-all'||!d.app||!d.classes) throw new Error('bad'); confirmDlg('استرجاع نسخة كاملة','هيتم استبدال كل الفصول الحالية بالفصول اللي في النسخة ('+d.app.classes.length+' فصل). متأكد؟','استرجاع',()=>restoreAll(d)); }catch(e){ toast('الملف ده مش نسخة كاملة صالحة'); } fileAll.value=''; });
   file.addEventListener('change',async()=>{ const f=file.files[0]; if(!f) return; try{ const d=JSON.parse(await f.text()); if(!d||!Array.isArray(d.students)||!Array.isArray(d.weeks)) throw new Error('bad'); confirmDlg('استرجاع نسخة احتياطية','هيتم استبدال بيانات الفصل الحالي ببيانات النسخة. متأكد؟','استرجاع',()=>{ Object.assign(S.cls,{students:d.students,weeks:d.weeks,exams:d.exams||[],examMax:d.examMax||15,nextSid:d.nextSid||(d.students.length+1)}); touch(); render(); toast('تم الاسترجاع'); }); }catch(e){ toast('الملف ده مش نسخة احتياطية صالحة'); } file.value=''; });
   return h('div',null,h('h2',null,'تصدير Excel'),h('p',{class:'sub'},'فصل '+c.name+' · '+st.subject),
     h('div',{class:'card'},
@@ -977,6 +979,8 @@ function exportScreen(){
       btn,h('div',{id:'xmsg',class:'hint',style:'margin-top:8px'},'')),
     h('div',{class:'card'},h('h3',{style:'font-size:17px;margin-bottom:6px'},'نسخة احتياطية'),h('p',{class:'sub'},'بيانات الفصل بتتحفظ تلقائيًا. تقدر كمان تنزّل نسخة JSON تحتفظ بها أو ترجّعها.'),
       h('div',{class:'bar'},h('button',{class:'btn',onclick:backup},'تنزيل نسخة احتياطية'),h('button',{class:'btn',onclick:()=>file.click()},'استرجاع نسخة'),file)),
+    h('div',{class:'card'},h('h3',{style:'font-size:17px;margin-bottom:6px'},'نسخة احتياطية لكل الفصول'),h('p',{class:'sub'},'ملف واحد فيه كل الفصول وبيانات المدرسة. احتفظ بيه على Drive أو واتساب.'),
+      h('div',{class:'bar'},h('button',{class:'btn primary',onclick:backupAll},'تنزيل نسخة كاملة'),h('button',{class:'btn',onclick:()=>fileAll.click()},'استرجاع نسخة كاملة'),fileAll),h('div',{id:'bmsg',class:'hint'},'')),
     h('p',{class:'hint'},S.store==='cloud'?'البيانات محفوظة في حسابك وتظهر على أي جهاز تفتح منه الصفحة بنفس الحساب.':'تنبيه: البيانات محفوظة في هذا المتصفح فقط. نزّل نسخة احتياطية بانتظام.'));
 }
 async function saveFile(filename, data, mime){
@@ -999,6 +1003,30 @@ async function doExport(){
 }
 async function backup(){
   try{ await saveFile(safeName('نسخة '+S.cls.name)+'.json',JSON.stringify(S.cls),'application/json'); }catch(e){ if(!(e&&e.code==='declined')) toast('تعذّر تنزيل النسخة'); }
+}
+
+async function backupAll(){
+  const msg=document.getElementById('bmsg'); if(msg) msg.textContent='جاري التجهيز…';
+  try{
+    try{ if(Object.keys(pending).length) await flush(); }catch(e){}
+    const classes={};
+    for (const c of S.app.classes){ classes[c.id]=await loadClass(c.id); }
+    const d={kind:'sijil-all',version:1,date:new Date().toISOString(),app:S.app,classes};
+    await saveFile('نسخة كاملة - سجل الدرجات - '+new Date().toISOString().slice(0,10)+'.json',JSON.stringify(d),'application/json');
+    if(msg) msg.textContent='تم تنزيل النسخة ('+S.app.classes.length+' فصل).';
+  }catch(e){ if(msg) msg.textContent='تعذّر تجهيز النسخة.'; }
+}
+async function restoreAll(d){
+  try{
+    const old=S.app.classes.map(c=>c.id);
+    for (const id of Object.keys(d.classes)) await writeDoc('c_'+id,d.classes[id]);
+    S.app={settings:{...DEFAULT_SETTINGS,...(d.app.settings||{})},classes:d.app.classes||[],activeId:d.app.activeId||null};
+    if(!S.app.classes.find(c=>c.id===S.app.activeId)) S.app.activeId=S.app.classes[0]?S.app.classes[0].id:null;
+    for (const k in clsCache) delete clsCache[k];
+    await writeDoc('app',S.app);
+    for (const id of old){ if(!d.classes[id]){ try{ await deleteDoc('c_'+id); }catch(e){} } }
+    S.cls=S.app.activeId?await loadClass(S.app.activeId):null; S.weekIdx=null; render(); toast('تم استرجاع النسخة الكاملة');
+  }catch(e){ toast('تعذّر الاسترجاع. حاول مرة تانية.'); }
 }
 
 boot();
