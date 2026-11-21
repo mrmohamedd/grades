@@ -234,18 +234,24 @@ table.g tbody tr:nth-child(even) td.idx{background:var(--alt)}
   function avgOf(list) { const a = list.filter(isNum); return a.length ? round2(a.reduce((x, y) => x + y, 0) / a.length) : null; }
   const numOrNull = v => (v === '' || v == null || !isFinite(+v)) ? null : +v;
 
-  function computeStudent(cls, sid) {
-    const weeks = cls.weeks.map(w => {
+  // a normal week is "graded" once at least one student has a weekly or homework grade in it;
+  // inside a graded week an empty cell counts as 0 (shown as غ in the sheet)
+  function gradedFlags(cls) {
+    return cls.weeks.map(w => w.type !== 'exam' && (cls.students || []).some(s => numOrNull(w.score && w.score[s.id]) != null || numOrNull(w.hw && w.hw[s.id]) != null));
+  }
+  function computeStudent(cls, sid, flags) {
+    flags = flags || gradedFlags(cls);
+    const weeks = cls.weeks.map((w, wi) => {
       const weekly = numOrNull(w.score && w.score[sid]);
       const hw = numOrNull(w.hw && w.hw[sid]);
       const abs = weekAbsCount(w, sid);
       if (w.type === 'exam') return { type: 'exam', weekly: null, hw: null, abs, att: null, total: null }; // exam week: no grades at all
       const att = attScore(abs);
-      const parts = [weekly, hw, att].filter(isNum);
-      return { type: w.type, weekly, hw, abs, att, total: parts.length ? parts.reduce((a, b) => a + b, 0) : null };
+      if (!flags[wi]) return { type: w.type, graded: false, weekly, hw, abs, att, total: null };
+      return { type: w.type, graded: true, weekly, hw, abs, att, wv: weekly == null ? 0 : weekly, hv: hw == null ? 0 : hw, total: (weekly == null ? 0 : weekly) + (hw == null ? 0 : hw) + att };
     });
-    const normal = weeks.filter(w => w.type !== 'exam');
-    const aW = avgOf(normal.map(w => w.weekly)), aH = avgOf(normal.map(w => w.hw)), aA = avgOf(normal.map(w => w.att));
+    const normal = weeks.filter(w => w.graded);
+    const aW = avgOf(normal.map(w => w.wv)), aH = avgOf(normal.map(w => w.hv)), aA = avgOf(normal.map(w => w.att));
     const parts = [aW, aH, aA].filter(isNum);
     const semTotal = parts.length ? round2(parts.reduce((a, b) => a + b, 0)) : null;
     const exams = (cls.exams || []).map(e => numOrNull(e.scores && e.scores[sid]));
@@ -351,7 +357,8 @@ table.g tbody tr:nth-child(even) td.idx{background:var(--alt)}
     const students = cls.students.slice(0, MAX_STUDENTS);
     const weeks = cls.weeks.slice(0, MAX_WEEKS);
     const rowOf = i => FIRST_ROW + i;
-    const calc = students.map(s => computeStudent({ weeks, exams: cls.exams || [] }, s.id));
+    const flags = gradedFlags({ weeks, students });
+    const calc = students.map(s => computeStudent({ weeks, exams: cls.exams || [] }, s.id, flags));
     const className = (cls.name || '').trim();
 
     /* ----- common header for the 8 record sheets ----- */
@@ -395,11 +402,12 @@ table.g tbody tr:nth-child(even) td.idx{background:var(--alt)}
         const r = rowOf(i), cw = calc[i].weeks[w];
         for (let d = 0; d < 6; d++) if (((wk.abs && wk.abs[s.id]) || 0) & (1 << d)) a.set(ac.day(d) + r, ABS);
         if (wk.type === 'exam') return;                 // exam week: every grade cell stays empty
-        g.set(gc.w + r, cw.weekly != null ? cw.weekly : ABS);   // not entered = absent (غ), a typed 0 stays 0
-        g.set(gc.h + r, cw.hw != null ? cw.hw : ABS);
         const absRange = q(ABS_SHEETS[page]) + '!' + ac.first + r + ':' + ac.last + r;
         g.set(gc.a + r, { f: 'CHOOSE(MIN(COUNTIF(' + absRange + ',"' + ABS + '"),3)+1,10,7,4,0)', v: cw.att });
-        g.set(gc.t + r, { f: 'IF(COUNT(' + gc.w + r + ':' + gc.a + r + ')=0,"",SUM(' + gc.w + r + ':' + gc.a + r + '))', v: cw.total });
+        if (!cw.graded) return;                          // nobody graded yet in this week: weekly/homework/total stay empty
+        g.set(gc.w + r, cw.weekly != null ? cw.weekly : ABS);   // not entered: shown as غ but counted as 0; a typed 0 stays 0
+        g.set(gc.h + r, cw.hw != null ? cw.hw : ABS);
+        g.set(gc.t + r, { f: 'SUM(' + gc.w + r + ':' + gc.a + r + ')', v: cw.total });
       });
     }
 
@@ -418,17 +426,17 @@ table.g tbody tr:nth-child(even) td.idx{background:var(--alt)}
     /* ----- semester average (O:R) on the last grade page: normal weeks only ----- */
     {
       const g4 = await S(GRADE_SHEETS[3]);
-      const normalIdx = weeks.map((w, i) => w.type === 'exam' ? -1 : i).filter(i => i >= 0);
+      const normalIdx = weeks.map((w, i) => flags[i] ? i : -1).filter(i => i >= 0);
       const ref = (col, idx, r) => { const { page, k } = weekLoc(idx); return q(GRADE_SHEETS[page]) + '!' + gradeCols(k)[col] + r; };
       g4.set('O5', 'متوسط الفصل الدراسى ' + (st.semester || 'الأول'));
       students.forEach((s, i) => {
         if (!normalIdx.length) return;
         const r = rowOf(i), c = calc[i];
-        const avgF = (col) => 'IFERROR(ROUND(AVERAGE(' + normalIdx.map(ix => ref(col, ix, r)).join(',') + '),2),"")';
+        const avgF = (col) => 'ROUND(SUM(' + normalIdx.map(ix => ref(col, ix, r)).join(',') + ')/' + normalIdx.length + ',2)';
         g4.set('O' + r, { f: avgF('w'), v: c.aW });
         g4.set('P' + r, { f: avgF('h'), v: c.aH });
         g4.set('Q' + r, { f: avgF('a'), v: c.aA });
-        g4.set('R' + r, { f: 'IF(COUNT(O' + r + ':Q' + r + ')=0,"",ROUND(SUM(O' + r + ':Q' + r + '),2))', v: c.semTotal });
+        g4.set('R' + r, { f: 'ROUND(SUM(O' + r + ':Q' + r + '),2)', v: c.semTotal });
       });
 
       /* ----- monthly / important exams (S..): n exams + average + notes ----- */
@@ -505,7 +513,7 @@ table.g tbody tr:nth-child(even) td.idx{background:var(--alt)}
   }
 
   const Engine = { ABS, MAX_WEEKS, MAX_STUDENTS, ORD, ordName, weekNos, DAYS, weekLabel, fmtDate, addDays, snapSaturday, toISO, parseISO, dayNumbers,
-    attScore, popcount, computeStudent, buildWorkbook, round2, numOrNull };
+    attScore, popcount, computeStudent, gradedFlags, buildWorkbook, round2, numOrNull };
   if (typeof module !== 'undefined' && module.exports) module.exports = Engine; else root.Engine = Engine;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 </script>
@@ -903,7 +911,7 @@ function scoreGrid(){
       h('td',null,numInput(20,w.score[s.id],set('score'),'a',ix,'غ')),h('td',null,numInput(10,w.hw[s.id],set('hw'),'b',ix,'غ')),att,tot);
   });
   return h('div',null,
-    h('p',{class:'hint'},'اكتب الدرجة واضغط Enter للانتقال للطالب التالي. الخانة الفاضية بتظهر «غ» في الإكسل، ولو كتبت 0 بتظهر 0.'),
+    h('p',{class:'hint'},'اكتب الدرجة واضغط Enter للانتقال للطالب التالي. الخانة الفاضية بتظهر «غ» في الإكسل وبتتحسب صفر في المجموع، ولو كتبت 0 بتظهر 0.'),
     h('div',{class:'gridwrap'},h('table',{class:'g'},h('thead',null,head),h('tbody',null,rows))));
 }
 
@@ -995,12 +1003,12 @@ function resultsScreen(){
     hero('النتائج','فصل '+c.name+' · اضغط على اسم الطالب لعرض سجله كاملًا',[[rows.length,'طالب'],[fmt(avgGrand),'متوسط الإجمالي'],[totalAbs,'إجمالي الغياب']]),
     h('div',{class:'bar'},h('div',{class:'seg'},[[false,'حسب الأسماء'],[true,'حسب الترتيب']].map(([k,l])=>h('button',{'aria-pressed':S.rank===k?'true':'false',onclick:()=>{S.rank=k;render();}},l)))),
     h('div',{class:'gridwrap'},h('table',{class:'g'},h('thead',null,head),h('tbody',null,body))),
-    h('p',{class:'hint',style:'margin-top:10px'},'الإجمالي = مجموع الفصل (متوسط الأسابيع العادية) + متوسط الاختبارات. أسابيع الامتحان بدون درجات، والخانة اللي ما اتسجلتش بتتحسب «غ» ومش داخلة في المتوسط.'));
+    h('p',{class:'hint',style:'margin-top:10px'},'الإجمالي = مجموع الفصل (متوسط الأسابيع العادية) + متوسط الاختبارات. أسابيع الامتحان بدون درجات، والخانة الفاضية في أسبوع اتسجلت فيه درجات بتظهر «غ» وبتتحسب صفر. الأسبوع اللي ما اتسجلتش فيه أي درجة لحد دلوقتي مش داخل في المتوسط.'));
 }
 function studentDlg(x){
   const c=S.cls, nos=nosOf();
   const rows=x.r.weeks.map((w,i)=>{
-    const ex=w.type==='exam', g=v=>ex?'—':(v==null?'غ':fmt(v));
+    const ex=w.type==='exam', g=v=>(ex||!w.graded)?'—':(v==null?'غ':fmt(v));
     return h('tr',null,h('td',null,E.ordName(nos[i])),h('td',null,E.fmtDate(c.weeks[i].start)),h('td',null,ex?'امتحان':'عادي'),h('td',null,g(w.weekly)),h('td',null,g(w.hw)),h('td',null,ex?'—':w.att),h('td',null,w.abs),h('td',{class:'hl'},ex?'—':fmt(w.total)));
   });
   const ex=c.exams.map((e,i)=>h('tr',null,h('td',null,e.name),h('td',null,fmt(x.r.exams[i]))));
@@ -1021,7 +1029,7 @@ function exportScreen(){
   file.addEventListener('change',async()=>{ const f=file.files[0]; if(!f) return; try{ const d=JSON.parse(await f.text()); if(!d||!Array.isArray(d.students)||!Array.isArray(d.weeks)) throw new Error('bad'); confirmDlg('استرجاع نسخة احتياطية','هيتم استبدال بيانات الفصل الحالي ببيانات النسخة. متأكد؟','استرجاع',()=>{ Object.assign(S.cls,{students:d.students,weeks:d.weeks,exams:d.exams||[],examMax:d.examMax||15,nextSid:d.nextSid||(d.students.length+1)}); touch(); render(); toast('تم الاسترجاع'); }); }catch(e){ toast('الملف ده مش نسخة احتياطية صالحة'); } file.value=''; });
   return h('div',null,h('h2',null,'تصدير Excel'),h('p',{class:'sub'},'فصل '+c.name+' · '+st.subject),
     h('div',{class:'card'},
-      h('p',{style:'margin-top:0'},'الملف بنفس شكل السجل الورقي: كل 5 أسابيع في ورقة غياب وورقة درجات، وآخر ورقة فيها متوسط الفصل واختبارات الشهور، ومعاهم الغلاف ومحضر الفتح ومحضر الغلق. الخانة اللي ما اتسجلتش فيها درجة بتطلع «غ»، وأسبوع الامتحان بيطلع بخاناته فاضية.'),
+      h('p',{style:'margin-top:0'},'الملف بنفس شكل السجل الورقي: كل 5 أسابيع في ورقة غياب وورقة درجات، وآخر ورقة فيها متوسط الفصل واختبارات الشهور، ومعاهم الغلاف ومحضر الفتح ومحضر الغلق. الخانة اللي ما اتسجلتش فيها درجة بتطلع «غ» وبتتحسب صفر، وأسبوع الامتحان بيطلع بخاناته فاضية.'),
       h('div',{class:'tiles'},h('div',{class:'tile'},h('b',null,c.students.length),h('span',null,'طالب')),h('div',{class:'tile'},h('b',null,c.weeks.length),h('span',null,'أسبوع')),h('div',{class:'tile'},h('b',null,c.exams.length),h('span',null,'اختبار'))),
       !c.weeks.length&&c.students.length?h('div',{class:'note'},'لسه ما سجلتش أسابيع، فالملف هيطلع بالأسماء والرؤوس فقط.'):null,
       btn,h('div',{id:'xmsg',class:'hint',style:'margin-top:8px'},'')),
