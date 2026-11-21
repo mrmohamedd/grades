@@ -103,9 +103,11 @@ table.g tr:last-child td{border-bottom:0}
 .tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px}
 .tile b{display:block;font-family:var(--font-display);font-size:24px}
 .tile span{font-size:13px;color:var(--muted)}
-.list{display:grid;gap:8px}
+.list{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
 .li{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:8px 12px}
-.li .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.li{min-width:0}
+.li .nm{flex:1;min-width:0;overflow-wrap:anywhere;line-height:1.35}
+.li .btn{flex:none}
 .li .ix{color:var(--muted);font-size:13px;min-width:24px}
 .overlay{position:fixed;inset:0;background:rgba(10,18,28,.55);z-index:50;display:flex;align-items:flex-end;justify-content:center}
 @media(min-width:640px){.overlay{align-items:center}}
