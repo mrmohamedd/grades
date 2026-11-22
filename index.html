@@ -255,10 +255,11 @@ table.g tbody tr:nth-child(even) td.idx{background:var(--alt)}
     const parts = [aW, aH, aA].filter(isNum);
     const semTotal = parts.length ? round2(parts.reduce((a, b) => a + b, 0)) : null;
     const exams = (cls.exams || []).map(e => numOrNull(e.scores && e.scores[sid]));
-    const examAvg = exams.length >= 2 ? avgOf(exams) : (exams.length === 1 ? exams[0] : null);
+    const exNums = exams.filter(isNum);
+    const examSum = exNums.length ? round2(exNums.reduce((a, b) => a + b, 0)) : null;   // exams are summed, not averaged
     const totalAbs = weeks.reduce((a, w) => a + w.abs, 0);
-    const grand = (semTotal == null && examAvg == null) ? null : round2((semTotal || 0) + (examAvg || 0));
-    return { weeks, aW, aH, aA, semTotal, exams, examAvg, totalAbs, grand };
+    const grand = (semTotal == null && examSum == null) ? null : round2((semTotal || 0) + (examSum || 0));
+    return { weeks, aW, aH, aA, semTotal, exams, examSum, totalAbs, grand };
   }
 
   /* ---------- XML patching ---------- */
@@ -456,21 +457,21 @@ table.g tbody tr:nth-child(even) td.idx{background:var(--alt)}
       });
       g4.merge('S5:' + numToCol(lastCol) + '5');
       g4.set('S5', 'اختبارات الشهور');
-      const avgName = n === 2 ? 'متوسط الاختبارين' : n === 3 ? 'متوسط الاختبارات الثلاثة' : 'متوسط الاختبارات الأربعة';
+      const avgName = n === 2 ? 'مجموع الاختبارين' : n === 3 ? 'مجموع الاختبارات الثلاثة' : 'مجموع الاختبارات الأربعة';
       for (let ci = 0; ci < n; ci++) {
         const col = numToCol(19 + ci);
         g4.set(col + '6', exams[ci] ? exams[ci].name : 'اختبار');
         g4.set(col + '7', maxE);
       }
       const avgCol = numToCol(19 + n), notesCol = numToCol(19 + n + 1);
-      g4.set(avgCol + '6', avgName); g4.set(avgCol + '7', maxE);
+      g4.set(avgCol + '6', avgName); g4.set(avgCol + '7', maxE * n);
       g4.set(notesCol + '6', 'ملاحظات');
       students.forEach((s, i) => {
         const r = rowOf(i), c = calc[i];
         exams.forEach((e, ci) => { if (c.exams[ci] != null) g4.set(numToCol(19 + ci) + r, c.exams[ci]); });
         if (exams.length >= 1) {
           const rng = 'S' + r + ':' + numToCol(18 + n) + r;
-          g4.set(avgCol + r, { f: 'IFERROR(ROUND(AVERAGE(' + rng + '),2),"")', v: c.examAvg });
+          g4.set(avgCol + r, { f: 'IF(COUNT(' + rng + ')=0,"",SUM(' + rng + '))', v: c.examSum });
         }
       });
       if (lastCol > 22) {
@@ -757,7 +758,7 @@ function welcome(){
   nm.addEventListener('keydown',e=>{ if(e.key==='Enter') go(); });
   return h('div',{class:'card',style:'margin-top:24px'},
     h('h2',null,'أهلًا بك في سجل الدرجات والغياب'),
-    h('p',{class:'sub'},'سجّل الحضور والدرجات أسبوعيًا، والتطبيق يحسب لك المواظبة والمتوسطات ويطلّع ملف Excel بنفس شكل السجل الورقي.'),
+    h('p',{class:'sub'},'سجّل المواظبة والدرجات أسبوعيًا، والتطبيق يحسب لك المواظبة والمتوسطات ويطلّع ملف Excel بنفس شكل السجل الورقي.'),
     h('div',{class:'field'},h('label',{for:'wc'},'اسم الفصل'),nm),
     h('div',{class:'bar'},h('button',{class:'btn primary',onclick:go},'إنشاء الفصل'),h('button',{class:'btn',onclick:settingsDlg},'بيانات المدرسة والمادة')));
 }
@@ -823,7 +824,7 @@ function weeksList(){
     hero('فصل '+c.name,S.app.settings.subject,[[students().length,'طالب'],[c.weeks.length+'/'+E.MAX_WEEKS,'أسبوع'],[c.exams.length,'اختبار']]),
     h('div',{class:'bar'},h('button',{class:'btn primary',disabled:full||!students().length,onclick:addWeekDlg},'+ إضافة أسبوع'),
       !students().length?h('span',{class:'hint'},'ضيف الطلاب الأول من أيقونة «الطلاب».'):null,full?h('span',{class:'hint'},'وصلت لأقصى عدد أسابيع في السجل.'):null),
-    c.weeks.length?h('div',{class:'weeks'},cards):h('div',{class:'empty'},'لسه مفيش أسابيع. ضيف أول أسبوع وابدأ تسجيل الحضور والدرجات.'));
+    c.weeks.length?h('div',{class:'weeks'},cards):h('div',{class:'empty'},'لسه مفيش أسابيع. ضيف أول أسبوع وابدأ تسجيل المواظبة والدرجات.'));
 }
 function weekFields(defDate, defNo){
   const date=h('input',{type:'date',id:'wdate',value:defDate});
@@ -852,7 +853,7 @@ function addWeekDlg(){
   const seg=h('div',{class:'seg',role:'group','aria-label':'نوع الأسبوع'});
   const paint=()=>{ seg.replaceChildren(...[['normal','أسبوع عادي'],['exam','أسبوع امتحان']].map(([k,l])=>h('button',{type:'button','aria-pressed':type===k?'true':'false',onclick:()=>{type=k;paint();}},l))); };
   paint();
-  openDialog('إضافة أسبوع',h('div',null,...f.nodes,h('div',{class:'field'},h('label',null,'نوع الأسبوع'),seg,h('span',{class:'hint'},'أسبوع الامتحان بيتسجل فيه الحضور بس، وخاناته بتفضل فاضية في الإكسل.')),err),[{label:'إضافة',kind:'primary',onClick:()=>{
+  openDialog('إضافة أسبوع',h('div',null,...f.nodes,h('div',{class:'field'},h('label',null,'نوع الأسبوع'),seg,h('span',{class:'hint'},'أسبوع الامتحان بيتسجل فيه المواظبة بس، وخاناته بتفضل فاضية في الإكسل.')),err),[{label:'إضافة',kind:'primary',onClick:()=>{
     const r=f.read(err,null); if(!r) return;
     c.weeks.push({no:r.n,start:r.start,type,abs:{},score:{},hw:{}}); c.weeks.sort((a,b)=>a.start<b.start?-1:1);
     S.weekIdx=c.weeks.findIndex(w=>w.start===r.start); S.weekTab='att'; touch(); closeDialog(); render(); window.scrollTo(0,0);
@@ -869,13 +870,13 @@ function weekDetail(){
   const w=wk(), i=S.weekIdx, exam=w.type==='exam';
   if (exam) S.weekTab='att';
   const typeSeg=h('div',{class:'seg',role:'group','aria-label':'نوع الأسبوع'},[['normal','عادي'],['exam','امتحان']].map(([k,l])=>h('button',{'aria-pressed':w.type===k?'true':'false',onclick:()=>{w.type=k;touch();render();}},l)));
-  const tabSeg=exam?null:h('div',{class:'seg',role:'group','aria-label':'القسم'},[['att','الحضور'],['score','الدرجات']].map(([k,l])=>h('button',{'aria-pressed':S.weekTab===k?'true':'false',onclick:()=>{S.weekTab=k;render();}},l)));
+  const tabSeg=exam?null:h('div',{class:'seg',role:'group','aria-label':'القسم'},[['att','المواظبة'],['score','الدرجات']].map(([k,l])=>h('button',{'aria-pressed':S.weekTab===k?'true':'false',onclick:()=>{S.weekTab=k;render();}},l)));
   return h('div',null,
     h('div',{class:'bar'},h('button',{class:'btn small',onclick:()=>{S.weekIdx=null;render();}},'→ كل الأسابيع'),h('span',{class:'grow'}),
       h('button',{class:'btn small',onclick:editWeekDlg},'تعديل الرقم والتاريخ'),h('button',{class:'btn small danger',onclick:()=>confirmDlg('حذف الأسبوع','هيتم حذف '+weekName(i)+' بكل غيابه ودرجاته. متأكد؟','حذف',()=>{S.cls.weeks.splice(i,1);S.weekIdx=null;touch();render();})},'حذف')),
     hero(weekName(i),E.fmtDate(w.start)+' ← '+E.fmtDate(E.addDays(w.start,5))),
     h('div',{class:'bar'},typeSeg,tabSeg),
-    exam?h('div',{class:'note'},'أسبوع امتحان: بيتسجل فيه الحضور والغياب بس. مفيش درجات أسبوعية، وخاناته بتطلع فاضية في الإكسل. درجات الاختبارات بتتسجل من أيقونة «الاختبارات».'):null,
+    exam?h('div',{class:'note'},'أسبوع امتحان: بيتسجل فيه المواظبة والغياب بس. مفيش درجات أسبوعية، وخاناته بتطلع فاضية في الإكسل. درجات الاختبارات بتتسجل من أيقونة «الاختبارات».'):null,
     S.weekTab==='att'?attGrid():scoreGrid());
 }
 function attChip(sid){ const n=E.popcount((wk().abs&&wk().abs[sid])||0), s=E.attScore(n); return {n,s}; }
@@ -926,17 +927,17 @@ function examsScreen(){
     h('button',{class:'btn small danger',onclick:()=>confirmDlg('حذف الاختبار','هيتم حذف «'+e.name+'» ودرجاته. متأكد؟','حذف',()=>{c.exams.splice(i,1);touch();render();})},'حذف')))):null;
   let grid=h('div',{class:'empty'},'ضيف الاختبارات المهمة (زي اختبار الشهر) علشان تسجل درجاتها.');
   if (c.exams.length && students().length){
-    const head=h('tr',null,h('th',{class:'idx'},'م'),h('th',{class:'name'},'الاسم'),c.exams.map(e=>h('th',null,e.name)),h('th',{class:'hl'},'المتوسط'));
+    const head=h('tr',null,h('th',{class:'idx'},'م'),h('th',{class:'name'},'الاسم'),c.exams.map(e=>h('th',null,e.name)),h('th',{class:'hl'},'المجموع'));
     const rows=students().map((s,ix)=>{
       const avg=h('td',{class:'hl'});
-      const paint=()=>{ const v=c.exams.map(e=>E.numOrNull(e.scores[s.id])).filter(x=>x!=null); avg.textContent=v.length?fmt(E.round2(v.reduce((a,b)=>a+b,0)/v.length)):'—'; };
+      const paint=()=>{ const v=c.exams.map(e=>E.numOrNull(e.scores[s.id])).filter(x=>x!=null); avg.textContent=v.length?fmt(E.round2(v.reduce((a,b)=>a+b,0))):'—'; };
       paint();
       return h('tr',null,h('td',{class:'idx'},ix+1),h('td',{class:'name',title:s.name},s.name),
         c.exams.map((e,k)=>h('td',null,numInput(c.examMax,e.scores[s.id],v=>{ if(v==null) delete e.scores[s.id]; else e.scores[s.id]=v; paint(); touch(); },'e'+k,ix))),avg);
     });
     grid=h('div',{class:'gridwrap'},h('table',{class:'g'},h('thead',null,head),h('tbody',null,rows)));
   }
-  return h('div',null,h('h2',null,'الاختبارات'),h('p',{class:'sub'},'عدد الاختبارات متغير حسب فصلك (حتى '+MAXE+'). المتوسط يتحسب من الاختبارات اللي اتسجلت درجتها.'),
+  return h('div',null,h('h2',null,'الاختبارات'),h('p',{class:'sub'},'عدد الاختبارات متغير حسب فصلك (حتى '+MAXE+'). المجموع بيتحسب من درجات الاختبارات اللي اتسجلت (مش متوسط).'),
     h('div',{class:'field',style:'max-width:260px'},h('label',null,'الدرجة العظمى لكل اختبار'),max),bar,chips,grid);
 }
 
@@ -994,16 +995,16 @@ function resultsScreen(){
   const totalAbs=rows.reduce((a,x)=>a+x.r.totalAbs,0);
   const rankMap=new Map(); [...withG].sort((a,b)=>b.r.grand-a.r.grand).forEach((x,i,arr)=>{ rankMap.set(x.s.id, i>0&&arr[i-1].r.grand===x.r.grand?rankMap.get(arr[i-1].s.id):i+1); });
   if (S.rank) rows=[...rows].sort((a,b)=>(b.r.grand==null?-1:b.r.grand)-(a.r.grand==null?-1:a.r.grand));
-  const head=h('tr',null,h('th',{class:'idx'},S.rank?'ترتيب':'م'),h('th',{class:'name'},'الاسم'),h('th',{class:'hl'},'الإجمالي (من '+(40+Number(c.examMax))+')'),h('th',null,'مجموع الفصل (من 40)'),h('th',null,'الاختبارات (من '+c.examMax+')'),h('th',null,'تقييم أسبوعي'),h('th',null,'كراس الواجب'),h('th',null,'المواظبة'),h('th',null,'الغياب'));
+  const head=h('tr',null,h('th',{class:'idx'},S.rank?'ترتيب':'م'),h('th',{class:'name'},'الاسم'),h('th',{class:'hl'},'الإجمالي (من '+(40+Number(c.examMax)*Math.max(2,c.exams.length))+')'),h('th',null,'مجموع الفصل (من 40)'),h('th',null,'مجموع الاختبارات (من '+(Number(c.examMax)*Math.max(2,c.exams.length))+')'),h('th',null,'تقييم أسبوعي'),h('th',null,'كراس الواجب'),h('th',null,'المواظبة'),h('th',null,'الغياب'));
   const body=rows.map((x,ix)=>h('tr',null,
     h('td',{class:'idx'},S.rank?h('span',{class:'rank'},rankMap.get(x.s.id)||'—'):ix+1),
     h('td',{class:'name',title:x.s.name},h('button',{class:'linkbtn',onclick:()=>studentDlg(x)},x.s.name)),
-    h('td',{class:'hl'},fmt(x.r.grand)),h('td',null,fmt(x.r.semTotal)),h('td',null,fmt(x.r.examAvg)),h('td',null,fmt(x.r.aW)),h('td',null,fmt(x.r.aH)),h('td',null,fmt(x.r.aA)),h('td',null,x.r.totalAbs)));
+    h('td',{class:'hl'},fmt(x.r.grand)),h('td',null,fmt(x.r.semTotal)),h('td',null,fmt(x.r.examSum)),h('td',null,fmt(x.r.aW)),h('td',null,fmt(x.r.aH)),h('td',null,fmt(x.r.aA)),h('td',null,x.r.totalAbs)));
   return h('div',null,
     hero('النتائج','فصل '+c.name+' · اضغط على اسم الطالب لعرض سجله كاملًا',[[rows.length,'طالب'],[fmt(avgGrand),'متوسط الإجمالي'],[totalAbs,'إجمالي الغياب']]),
     h('div',{class:'bar'},h('div',{class:'seg'},[[false,'حسب الأسماء'],[true,'حسب الترتيب']].map(([k,l])=>h('button',{'aria-pressed':S.rank===k?'true':'false',onclick:()=>{S.rank=k;render();}},l)))),
     h('div',{class:'gridwrap'},h('table',{class:'g'},h('thead',null,head),h('tbody',null,body))),
-    h('p',{class:'hint',style:'margin-top:10px'},'الإجمالي = مجموع الفصل (متوسط الأسابيع العادية) + متوسط الاختبارات. أسابيع الامتحان بدون درجات، والخانة الفاضية في أسبوع اتسجلت فيه درجات بتظهر «غ» وبتتحسب صفر. الأسبوع اللي ما اتسجلتش فيه أي درجة لحد دلوقتي مش داخل في المتوسط.'));
+    h('p',{class:'hint',style:'margin-top:10px'},'الإجمالي = مجموع الفصل (متوسط الأسابيع العادية) + مجموع الاختبارات (بيتجمعوا مش بيتعمل لهم متوسط). أسابيع الامتحان بدون درجات، والخانة الفاضية في أسبوع اتسجلت فيه درجات بتظهر «غ» وبتتحسب صفر. الأسبوع اللي ما اتسجلتش فيه أي درجة لحد دلوقتي مش داخل في المتوسط.'));
 }
 function studentDlg(x){
   const c=S.cls, nos=nosOf();
@@ -1013,7 +1014,7 @@ function studentDlg(x){
   });
   const ex=c.exams.map((e,i)=>h('tr',null,h('td',null,e.name),h('td',null,fmt(x.r.exams[i]))));
   const body=h('div',null,
-    h('div',{class:'tiles'},h('div',{class:'tile'},h('b',null,fmt(x.r.semTotal)),h('span',null,'مجموع الفصل من 40')),h('div',{class:'tile'},h('b',null,fmt(x.r.examAvg)),h('span',null,'متوسط الاختبارات')),h('div',{class:'tile'},h('b',null,fmt(x.r.grand)),h('span',null,'الإجمالي')),h('div',{class:'tile'},h('b',null,x.r.totalAbs),h('span',null,'أيام الغياب'))),
+    h('div',{class:'tiles'},h('div',{class:'tile'},h('b',null,fmt(x.r.semTotal)),h('span',null,'مجموع الفصل من 40')),h('div',{class:'tile'},h('b',null,fmt(x.r.examSum)),h('span',null,'مجموع الاختبارات')),h('div',{class:'tile'},h('b',null,fmt(x.r.grand)),h('span',null,'الإجمالي')),h('div',{class:'tile'},h('b',null,x.r.totalAbs),h('span',null,'أيام الغياب'))),
     rows.length?h('div',{class:'gridwrap',style:'max-height:40vh'},h('table',{class:'g'},h('thead',null,h('tr',null,['الأسبوع','التاريخ','النوع','تقييم','واجب','مواظبة','غياب','المجموع'].map(t=>h('th',null,t)))),h('tbody',null,rows))):h('p',{class:'hint'},'لا توجد أسابيع بعد.'),
     ex.length?h('div',{class:'gridwrap',style:'margin-top:12px'},h('table',{class:'g'},h('thead',null,h('tr',null,h('th',null,'الاختبار'),h('th',null,'الدرجة'))),h('tbody',null,ex))):null);
   openDialog(x.s.name,body,[{label:'إغلاق',onClick:closeDialog}]);
